@@ -8,8 +8,8 @@ Objective : Practical work on our Statistical Analysis and Data Mining Course
 
 
 
-Team : Team of 2   
-Time Spent : ~10 hours per Report   
+Team : Team of 3   
+Time Spent : ~8 hours per Report   
 Technologies used:
 - R
 - Rmd
