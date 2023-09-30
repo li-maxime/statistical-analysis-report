@@ -25,7 +25,7 @@ List of Practical works and notion:
     * Principal components regression (PCR)
     * PCR and cross-validation
 
-- TP 3: [Classification with genetic markers](TP3_Classification_with_genetic_markers) : 
+- TP 3: [Classification with genetic markers](https://li-maxime.github.io/statistical-analysis-report/TP3_Classification_with_genetic_markers) : 
     * Multinomial regression
     * Linear discriminant analysis
     * Naive Bayes classifier
