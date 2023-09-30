@@ -1,0 +1,316 @@
+---
+title: "TP2"
+output: html_document
+date: "2023-03-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+suppressMessages(library(spam))
+suppressMessages(library(viridis))
+suppressMessages(library(viridisLite))
+suppressMessages(library(maps))
+suppressMessages(library(fields))
+```
+
+# OLIVEIRA MOMBACH Aline, LI Maxime and PIOT Ghislain.
+## TP 2: Principal components regression in genetics
+
+The group is made up of OLIVEIRA MOMBACH Aline, LI Maxime and PIOT Ghislain.
+
+```{r echo=FALSE, warn=FALSE}
+library('fields')
+```
+
+## Exercise 1: Data
+
+```{r echo=TRUE}
+# read the data in the table "NAm2.txt". The header=TRUE argument specifies that the first row of the file contains the column names.
+NAm2 = read.table("NAm2.txt", header=TRUE)
+# extract a single point for each unique value of the "Pop" column in the NAm2 table
+names=unique(NAm2$Pop)
+# determine the number of unique names
+npop=length(names)
+# extract a data frame containing the unique combinations of "Pop", "long", and "lat" coordinates from the NAm2 table
+coord=unique(NAm2[,c("Pop","long","lat")])
+# create a vector of color names that will be used to color the points in the plot. The vector is repeated three times
+colPalette=rep(c("black","red","cyan","orange","brown","blue","pink", "purple","darkgreen"),3)
+# create a vector of point symbols that will be used in the plot. The vector is repeated nine times for each of the three types of symbols
+pch=rep(c(16,15,25),each=9)
+# create a scatter plot of the "long" and "lat" coordinates in the coord data frame. The pch and col arguments are used to specify the point symbols and colors, respectively. The asp argument is set to 1 to ensure that the plot has the correct aspect ratio between the x and y axes. This ensures that the map is not distorted.
+plot(coord[,c("long","lat")],pch=pch,col=colPalette,asp=1)
+#  add a legend to the plot. 
+# bottomleft: specifies the location of the legend
+# legend:  text labels            col: colors
+# lty: line types                 pch: point symbols 
+# cex: font size                  ncol:  number of columns 
+# lwd: line widths of the legend
+legend("bottomleft",legend=names,col=colPalette,lty=-1,
+pch=pch,cex=0.75,ncol=2,lwd=2)
+library(maps); map("world",add=T)
+```
+
+The description of the code is done with comments but overall this code reads data about population locations, creates a scatter plot with unique colors and point characters, adds a legend, and overlays a world map. The data is read from NAm2 file, and unique values are extracted. The scatter plot is based on latitude and longitude coordinates, with correct aspect ratio. The legend shows population names, and the world map is overlaid using the maps library.
+
+## Exercise 2: Linear regression
+```{r}
+NAaux = NAm2[,-c(1:7)]
+df = data.frame(NAaux)
+first_model = lm(df$long ~ ., data = df)
+summary(first_model$coefficients)
+```
+
+We can see that there are 5216 Na coefficients in the model. The regression doesn't work because there are more predictors than samples in the dataset. This results in a large number of eigenvectors for the eigenvalue 0.
+
+## Exercise 3: Best subset selection
+
+### a)
+
+Principal Component Analysis is a statistical method used to reduce the dimensionality of a dataset by identifying the predictors contributing to most of the variance of the data. We create a new basis where the vectors are sorted by their increasing contribution to the variance. Those vectors are found by looking for eigenvectors.
+
+### b)
+
+We don't have to use the SCALE parameter, as long as we use CENTER. However, it can be helpful and make the results better. 
+
+The first graph is without scaling.
+
+```{r}
+pcaData =  NAm2[,-c(1:8)]
+pcaNAm2 = prcomp(pcaData, scale=F)
+plot_pca <- function(pca) {
+  caxes=c(1,2)
+  plot(pca$x[,caxes],col="white")
+  for (i in 1:npop)
+  {
+    #print(names[i])
+    lines(pca$x[which(NAm2[,3]==names[i]),caxes], type="p",
+    col=colPalette[i],pch=pch[i])
+    legend("top",legend=names,col=colPalette,
+    lty=-1,pch=pch,cex=0.75,ncol=3,lwd=2)
+  }
+}
+plot_pca(pcaNAm2)
+```
+
+The second graph is with scaling enabled.
+
+```{r}
+pcaNAm3 = prcomp(pcaData, scale=T)
+plot_pca(pcaNAm3)
+```
+
+
+### c) 
+
+We can see in both graphs that 2 tribes can be easily distinguished : the Ache and the Surui. At first glance, it seems that the graph without scaling makes it easier to pick them out. However, the blob with the rest is more spread out on the graph with scaling and it might have more information. 
+
+### d)
+
+```{r}
+#summary(pcaNAm3)
+vars <- apply(pcaNAm3$x, 2, var)  
+props <- vars / sum(vars)
+cumsums <- cumsum(props)
+plot(cumsums, type="l", main = "Percentage of variance captured as a function of the number of PC", xlab = "Number of principal component", ylab = "Percentage of variance captured")
+abline(h=0.8, col = 2, lty = 2)
+abline(v=299, col = 2, lty = 2)
+abline(h=0.5, col = 3, lty = 2)
+abline(v=139, col = 3, lty = 2)
+```
+
+The first two components give us 3.39% of the total variance.
+We can see that the percentage of variance brought by the nth PC seems to exponentially decrease as the n increases. So it is only natural to keep the first k components if we only want to keep k.
+
+Depending on the percentage of variances that we want, the number of components differs.
+For example, if we want at least 80% of the variances, only 299 principal components suffice.
+This number fell to 139 in order to get 50%. So only a quarter of the total component is needed to capture half of the variance.
+
+
+
+## Exercise 4: Principal components regression (PCR)
+### a)
+```{r}
+axes_pca = 2 + seq(1, 250)
+matrix_tmp <- data.frame(cbind(NAm2[,c(7,8)], pcaNAm2$x))
+lmlong <- lm(long ~., data = matrix_tmp[,c(2,axes_pca)])
+lmlat <- lm(lat ~., data = matrix_tmp[,c(1,axes_pca)])
+```
+
+```{r}
+plot(lmlong$fitted.values,lmlat$fitted.values,col="white",asp=1)
+for (i in 1:npop)
+{
+  lines(lmlong$fitted.values[which(NAm2[,3]==names[i])],
+  lmlat$fitted.values[which(NAm2[,3]==names[i])],
+  type="p", col=colPalette[i],pch=pch[i])
+}
+legend("bottomleft",legend=names,col=colPalette,lty=-1,
+pch=pch, cex=.75,ncol=3,lwd=2)
+map("world",add=T)
+```
+
+The results of this exercise are not too precise, although they very similar to the results of the first one, but now we use all the points spread around a region and not just one point per population. Because of this, it's a little bit hard to identify the data.
+
+### b)
+
+```{r}
+predictedLong = predict(lmlong, matrix_tmp[,c(axes_pca)])
+predictedLat = predict(lmlat, matrix_tmp[,c(axes_pca)])
+trueLong = matrix_tmp[,2]
+trueLat = matrix_tmp[,1]
+predictedMatrix = matrix(c(predictedLong, predictedLat ), ncol = 2)
+trueMatrix = matrix(c(trueLong, trueLat ), ncol = 2)
+dists = rdist.earth.vec(predictedMatrix, trueMatrix, miles=F)
+print(sqrt(mean(dists^2)))
+```
+
+The mean error calculated is 761.1993. 
+
+## Exercise 5: PCR and cross-validation
+
+### a)
+
+Cross-validation is a technique used to assess the performance of a predictive model by partitioning the available data into subsets, training the model on one subset, and evaluating its performance on the other subset. This process is repeated multiple times with different partitions of the data, and the results are averaged to provide an estimate of the model's performance.
+
+Cross-validation is useful when building a predictive model because it helps to ensure that the model is not overfitting to the training data, which can lead to poor performance on new, unseen data.
+
+To create the ten sets. We are going to use the value of the index modulo 10
+
+```{r echo=TRUE}
+setList <- c(1:nrow(NAm2))%%10
+```
+
+### b)
+
+#### 1
+
+```{r echo=TRUE}
+predictedCoord <- data.frame(matrix(nrow = nrow(NAm2), ncol=2))
+colnames(predictedCoord) <- c("longitude","latitude")
+```
+
+#### 2
+
+```{r echo=TRUE}
+pcaCoord <- data.frame(cbind(NAm2[,c(7,8)], pcaNAm2$x))
+#We train our model on every set except the set 1 on both latitude and longitude with the first 4 PCA
+modelLong <- lm(long ~., data = pcaCoord[,c(2,3,4,5,6)], subset = (setList!=1))
+modelLat <- lm(lat ~., data = pcaCoord[,c(1,3,4,5,6)], subset = (setList!=1))
+summary(modelLong)
+summary(modelLat)
+
+```
+We can see that we have strong evidence that PC2, PC3 and PC4 are statistically significant in both the prediction of latitude and longitude because their p value is really small. Whereas the high value of PC1 p value seem to indicate PC1 is not important for predicting the latitude and longitude (or that the sample size is too small to detect a meaningful effect).
+
+
+
+#### 3
+
+```{r echo=TRUE}
+predictedCoord[setList == 1,1] = predict(modelLong, newdata = pcaCoord[which(setList == 1),c(3,4,5,6)])
+predictedCoord[setList == 1,2] = predict(modelLat, newdata = pcaCoord[which(setList == 1),c(3,4,5,6)])
+```
+
+#### 4
+
+```{r echo=TRUE}
+library("fields")
+crossValidation <- function(naxes){
+  predictedCoord <- data.frame(matrix(nrow = nrow(NAm2), ncol=2))
+  trainingCoord <- data.frame(matrix(nrow = nrow(NAm2), ncol=2))
+  colnames(predictedCoord) <- c("longitude","latitude")
+  colnames(trainingCoord) <- c("longitude","latitude")
+  pcaCoord <- data.frame(cbind(NAm2[,c(7,8)], pcaNAm2$x[,c(1:naxes)]))
+  pcaLong <- pcaCoord[-1]
+  pcaLat <- pcaCoord[-2]
+  trainingError = 0  # Sum of training error
+  count = 0          # Counter of element to calculate the mean
+  realCoord <- NAm2[,c(7,8)]
+  for (i in (0:9)){
+    modelLong <- lm(long ~., data = pcaLong, subset = (setList!=i))
+    modelLat <- lm(lat ~., data = pcaLat, subset = (setList!=i))
+    trainingCoord[setList != i,2] = predict(modelLong, newdata = pcaCoord[which(setList != i),])
+    trainingCoord[setList != i,1] = predict(modelLat, newdata = pcaCoord[which(setList != i),])
+    predictedCoord[setList == i,2] = predict(modelLong, newdata = pcaCoord[which(setList == i),])
+    predictedCoord[setList == i,1] = predict(modelLat, newdata = pcaCoord[which(setList == i),])
+    dist <- diag(rdist.earth(realCoord[setList != i,], trainingCoord[setList != i,], miles = F))
+    trainingError = trainingError + sum(dist^2)
+    count = count + length(dist)
+  }
+
+  dist <- diag(rdist.earth(realCoord, predictedCoord, miles = F))
+  # We use the MSE for the error
+  result <- c(sqrt(mean(dist^2)), sqrt(trainingError/count))
+  return(result)
+}
+result <- crossValidation(4)
+```
+```{r}
+cat("The training error is ",result[2],"(km) and the prediction error is ",result[1],"(km)\n\n")
+```
+
+### c)
+```{r}
+naxesList <- seq(2, 440, by=10)
+predictionError <-c()
+trainingError <-c()
+for (i in 1:length(naxesList)){
+  #print(naxesList[i])
+  a <- crossValidation(naxesList[i])
+  predictionError[i] <- a[1]
+  trainingError[i] <- a[2]
+}
+```
+```{r}
+plot(naxesList, predictionError, main = "Training and Prediction Error as a function of naxes", xlab = "Number of predictors", ylab = "Mean Squared Error",ylim =c(0, 4000) , col = 3)
+points(naxesList,trainingError, col = 4)
+legend("topright", legend = c("Training Error", "Prediction Error", "Minimum"),lty = 1, col = c(4,3,2))
+abline(v=naxesList[which.min(predictionError)], col = 2)
+cat("The model that minimize the prediction error have", naxesList[which.min(predictionError)], "predictors\n")
+
+```
+### d)
+We are going to keep the model that has the lowest validation error, which means the one with the first 72 PCA axes.
+```{r}
+indice_model = which.min(predictionError)
+naxese_model = naxesList[indice_model]
+cat("The training error is ",trainingError[indice_model],"(km) and the prediction error is ",predictionError[indice_model],"(km)\n\n")
+```
+As expected, the prediction error is greater than the training error because the model is optimized to fit the training data, but may not generalize well to new, unseen data.
+
+We can see that for a number of axes greater than 72, the prediction error begin to rise even if the training error is still declining. It is due to the fact that the model is over fitting with the dataset.
+
+```{r}
+pcaCoord <- data.frame(cbind(NAm2[,c(7,8)], pcaNAm2$x[,c(1:naxese_model)]))
+pcaLong <- pcaCoord[-1]
+pcaLat <- pcaCoord[-2]
+modelLong <- lm(long ~., data = pcaLong)
+modelLat <- lm(lat ~., data = pcaLat)
+
+plot(modelLong$fitted.values,modelLat$fitted.values,col="white",asp=1)
+for (i in 1:npop)
+{
+  lines(modelLong$fitted.values[which(NAm2[,3]==names[i])],
+  modelLat$fitted.values[which(NAm2[,3]==names[i])],
+  type="p", col=colPalette[i],pch=pch[i])
+}
+legend("bottomleft",legend=names,col=colPalette,lty=-1,
+pch=pch, cex=.75,ncol=3,lwd=2)
+map("world",add=T)
+```
+
+## Exercise 6: Conclusion
+
+In order to accurately choose the number of predictors for our model, we will use 10-fold cross validation. Because of the massive amount of features compared to the number of samples, we used Primary Component Regression. Because we are predicting spatial coordinates, we will need to train 2 models every time : one for lattitude and one for longitude.
+
+Once we have decided to use the PCR, we need to choose how many primary components we will end up using. Because of the way the analysis works, the lower axes carry more of the total variance, which is why we start from PC1 and include more. Starting from the last axis would not make much sense. 
+
+In order to accurately compare the models, we input the Great Circle distance into the Mean-Squared Error for our loss function. This correctly accounts for the fact that the Earth is round.
+
+Using 10-fold cross validation, we end up choosing the model using the first 72 primary components. Those components account for 32% of the total variance. This model has a training error of 660.3 km and a prediction error of 779.1 km. 
+
+In the plot of the training and prediction errors, we can see that while both error goes down until around 100 axes, they start decorrelating and the validation error starts shooting up. This is textbook overfitting, which we are thankfully avoiding.
+
+There are many ways to try and improve our model. First of all, we could separate the cross validation process for both models. Both models don't need to have the same predictors. 
+We could also use statistical methods such as bagging and boosting, or switch to another algorithm such as SVM or Deep Neural Networks. 
+

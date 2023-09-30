@@ -1,0 +1,421 @@
+---
+title: "tp3"
+output: html_document
+date: "2023-03-27"
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+suppressMessages(library(spam))
+suppressMessages(library(viridis))
+suppressMessages(library(viridisLite))
+suppressMessages(library(maps))
+suppressMessages(library(fields))
+suppressMessages(library(nnet))
+suppressMessages(library(MASS))
+suppressMessages(library(class))
+suppressMessages(library(foreach))
+suppressMessages(library(doParallel))
+suppressMessages(library(caTools))
+suppressMessages(library(naivebayes))
+
+numCores <- detectCores() -2
+registerDoParallel(numCores)
+set.seed(0)
+```
+
+# OLIVEIRA MOMBACH Aline, LI Maxime and PIOT Ghislain.
+## TP 3 Classification with genetic markers
+
+## Part 1: Data
+
+```{r}
+# read the data in the table "NAm2.txt". The header=TRUE argument specifies that the first row of the file contains the column names.
+NAm2 = read.table("NAm2.txt", header=TRUE)
+
+cont <- function(x){
+  if(x %in% c('Canada'))
+    cont <- 'NorthAmerica'
+  else if(x %in% c('Guatemala', 'Mexico', 'Panama', 'CostaRica'))
+    cont<-'CentralAmerica'
+  else
+     cont<-'SouthAmerica'
+  return(factor(cont))
+}
+contID<-sapply(as.character(NAm2[,4]),FUN=cont)
+levelscontID <- levels(contID)
+```
+
+## Part 2 : Multinomial regression
+```{r}
+NAcont <- cbind(contID=contID, NAm2[,-(1:8)])
+NAcont[,1] <- factor(NAcont[,1])
+```
+```{r}
+# model_first <- multinom(NAcont$contID~., data=NAcont, MaxNWts=18000, it=200)
+```
+
+The fit function crashes because the the multinom function has a default limit to prevent being too slow ( by trying to create a Neural Network with too many neurons in the hidden layer). 
+
+### b)
+```{r}
+sample = sample.split(NAcont[,1], SplitRatio = .90)
+trainingSet = subset(NAcont, sample == TRUE)
+testingSet = subset(NAcont, sample == FALSE)
+
+trainingSet.pca = prcomp(trainingSet[,-1], scale=F)
+testingSet.pca = predict(trainingSet.pca, testingSet[,-1])
+trainingset.pcaDF = as.data.frame(trainingSet.pca$x)
+testingSet.pca = as.data.frame(predict(trainingSet.pca, testingSet[,-1]))
+trainingSet.contID = trainingSet[,1]
+testingSet.contID = testingSet[,1]
+
+model <- multinom(trainingSet$contID ~ ., data = as.data.frame(trainingSet.pca$x), MaxNWts=18000, it=200)
+```
+
+```{r}
+predicted <- predict(model, trainingset.pcaDF)
+table(predicted, trainingSet.contID)
+```
+
+We get a perfect confusion matrix, but this is to be expected because we are using our training data as validation data. By using all the primary components, we probably over fitted our model. 
+
+
+### c)
+```{r}
+setList <- sample(c(1:nrow(trainingSet)),size = nrow(trainingSet))%%10
+
+noContId = trainingSet[,-1]
+
+multinomCV <- function(naxes){
+  valErrors = c()
+  for (i in (0:9)){
+    trainData = trainingSet[which(setList!=i),]
+    testData = trainingSet[which(setList==i),]
+    trainContId = trainingSet.contID[which(setList != i)]
+    pcaDataCurrent <- prcomp(trainData[,-1], scale=F ) # TODO
+    pcaDataTest <- predict(pcaDataCurrent, newdata=testData[,-1])
+    
+    pcaModel = data.frame(pcaDataCurrent$x[,c(1:(1+naxes))])
+    model <- multinom(trainContId ~., data = pcaModel, MaxNWts=10000, trace=F)
+    trainingResult = predict(model, pcaDataTest)
+    valErrors = append(valErrors, sum( trainingResult != trainingSet.contID[which(setList==i)]))
+  }
+  sorted = sort(valErrors/(nrow(trainingSet)/10))
+  return(c( median(sorted), sorted[2], tail(sorted, 2)[1], naxes))
+}
+```
+
+```{r}
+graphBars <- function(df) {
+  for(i in 1:nrow(df)) {
+    row <- unlist(df[i,])
+    x = row[4]
+    y = row[1] * 100
+    high = row[3] * 100
+    low = row[2] * 100
+    arrows(x,high, x, low, angle=90, code=3, length=0.1)
+  }
+}
+
+graphError <- function(crossValidation, name){
+  naxesList <- seq(2, 400, by=10)
+  validationError <-list()
+  result = list()
+  for (i in naxesList) {
+    new = crossValidation(i)
+    result = rbind(result, new)
+  }
+  result = as.data.frame(result)
+  colnames(result) = c("Median", "Low quartile", "High quartile", "Number of axes")
+  validationError = unlist(result[,1], use.names = F) * 100
+  plot(naxesList, validationError, main = paste(name, "Validation Error as a function of naxes"), xlab = "Number of predictors", ylab = "Prediction Error(%)", col = 3, type="l")
+  abline(v=naxesList[which.min(validationError)], col = 2)
+  minimum = naxesList[which.min(validationError)]
+  graphBars(result)
+  cat("The model that minimize the validation Error have between", minimum - 9," and ", minimum + 9, "predictors\n")
+
+  naxesList2 <- seq(max(0, minimum - 9), min(minimum + 9, 400))
+  result2 = list()
+  for (i in naxesList2) {
+    new = crossValidation(i)
+    result2 = rbind(result2, new)
+  }
+  colnames(result2) = c("Median", "Low quartile", "High quartile", "Number of axes")
+  validationError2 = unlist(result2[,1], use.names = F) * 100
+  plot(naxesList2, validationError2, main = paste(name, "Validation Error as a function of naxes"), xlab = "Number of predictors", ylab = "Prediction Error(%)", col = 3, type="l")
+  abline(v=naxesList2[which.min(validationError2)], col =2)
+  cat("The model that minimize the prediction error have ", naxesList2[which.min(validationError2)], "predictors and the validation Error is ", min(validationError2),"%\n" )
+  graphBars(result2)
+
+  return (c(naxesList2[which.min(validationError2)],validationError))
+}
+```
+
+```{r KCVMN}
+multinomRes = graphError(multinomCV, "Multinom")
+multinomMin = multinomRes[1]
+multinomError = multinomRes[-1]
+```
+
+#### d
+
+
+```{r}
+# pcaNAm2 = prcomp(NAcont[,-1], scale=F)
+# pcaCont = data.frame(cbind(contID=contID, pcaNAm2$x))
+modelMultinom <- multinom(trainingSet$contID ~ ., data = trainingset.pcaDF[,c(1:multinomMin+1)], MaxNWts=18000, it=200)
+```
+
+```{r}
+predicted <- predict(modelMultinom, trainingset.pcaDF)
+table(predicted, trainingSet.contID)
+```
+The confusion matrix on the training data is perfect and is the same as before. It is not completely expected, since we are evaluating a model on the data it was trained with. However, we are getting the same results with only a fraction of the total "information" since we are only using 58 of the 400 principal components. This means that we managed to get rid of a lot of noise.
+
+Thankfully, we have a separate test set we can use that is completely unknwown to the model.
+
+```{r}
+pcaTestSet = predict(trainingSet.pca, testingSet[,-1])
+predictedTest <- predict(modelMultinom, pcaTestSet)
+table(predictedTest, testingSet.contID)
+```
+
+We can see that the confusion matrix is worse on the testing set, which is to be expected. It is the accuracy on the testing set that is the most important, because it uses data that is completely new. 
+
+## Part 3 : Linear discriminant analysis
+
+```{r}
+ldaModel <- lda(trainingset.pcaDF, grouping = trainingSet.contID , tol = 0)
+#Set tolerance very small for PC494 or else we get "variable 494 appears to be constant within groups". 
+
+#summary(ldaModel)
+predicted <- predict(ldaModel, trainingset.pcaDF)$class 
+table(predicted, trainingSet.contID)
+```
+```{r}
+pcaModel = data.frame(trainingset.pcaDF)
+model <- lda(pcaModel , grouping = trainingSet[,1] , tol = 0.000000000000001)
+testingResult = predict(model, testingSet.pca)$class
+
+table(testingResult, testingSet[,1])
+```
+We need to use a really small tolerance because the 444th PC is so small that it is recognized as a constant vector.
+We got really bad results (only 9 correctly predicted out of the testing set) because we used all the principal components and a very small tolerance.
+It results in overfitting the data, where the model is too complex and fits the noise in the data rather than the underlying patterns.
+
+```{r}
+
+ldaCV <- function(naxes, tol = 0.001){
+  valErrors = c()
+  for (i in 0:9) {
+    trainData = trainingSet[which(setList!=i),]
+    testData = trainingSet[which(setList==i),]
+    trainContId = trainingSet.contID[which(setList != i)]
+    pcaDataCurrent <- prcomp(trainData[,-1], scale=F ) # TODO
+    pcaDataTest <- predict(pcaDataCurrent, newdata=testData[,-1])
+    
+    pcaModel = data.frame(pcaDataCurrent$x[,c(1:(naxes))])
+    model <- lda(pcaModel , grouping = trainContId , tol = tol)
+    trainingResult = predict(model, pcaDataTest[,c(1:(naxes))])$class
+
+    
+    valErrors = append(valErrors, sum( trainingResult != trainingSet.contID[which(setList==i)]))
+  }
+  
+  sorted = sort(valErrors/(nrow(trainingSet)/10))
+  return(c( median(sorted), sorted[2], tail(sorted, 2)[1], naxes))
+}
+```
+
+
+```{r KCVLDA}
+ldaRes = graphError(ldaCV, "LDA")
+ldaMin = ldaRes[1]
+ldaError = ldaRes[-1]
+```
+We can see that the Validation error seems to decrease greatly at first between 2 and 52 predictors, then seem to plateau until a certain point where the prediction error explodes. This point seems to depend on the tolerance given to the lda function. The greater the value, the earlier the boost. It is due to the fact that a higher tolerance tend to shrinks the estimated covariance matrices towards a diagonal matrix, and for a number of PCA too high, we lose too much information and underfit the data set
+
+The tolerance affects the degree of regularization or shrinkage applied to the estimated covariance matrices, a high tolerance value shrinks the estimated covariance matrices towards a diagonal matrix, while a low tolerance value allows the estimated covariance matrices to be more complex.
+
+Because of that it directly affect overfitting and underfitting : a high tolerance value can prevent overfitting by reducing the complexity of the estimated covariance matrices, while a low tolerance value can prevent underfitting by allowing the estimated covariance matrices to capture more complex relationships in the data.
+
+```{r ldaTol}
+
+naxesList <- seq(2, 400, by=20)
+validationError <-c()
+tolerance_0.1 <- foreach (i = 1:length(naxesList), .combine = c) %do%{
+  ldaCV(naxesList[i], 0.1)[1]
+}
+tolerance_0.2 <- foreach (i = 1:length(naxesList), .combine = c) %do%{
+  ldaCV(naxesList[i], 0.2)[1]
+}
+tolerance_0.0 <- foreach (i = 1:length(naxesList), .combine = c) %do%{
+  ldaCV(naxesList[i], 0)[1]
+}
+
+
+validationError <- validationError*100
+plot(naxesList, tolerance_0.1, main = paste("LDA : Validation Error as a function of naxes"), xlab = "Number of predictors", ylab = "Prediction Error(%)", col = 3, type="l")
+lines(naxesList, tolerance_0.2, col = 2)
+lines(naxesList, tolerance_0.0, col = 4)
+abline(v=naxesList[which.min(tolerance_0.1)], col = 3)
+abline(v=naxesList[which.min(tolerance_0.2)], col = 2)
+abline(v=naxesList[which.min(tolerance_0.0)], col = 4)
+legend("topright", legend = c("tolerance 0.2", "tolerance 0.1", "tolerance 0.0"),lty = 1, col = c(2,3,4))
+#minimum = naxesList[which.min(validationError)]
+```
+We can see that for the tolerance à and 0.1, the minimum is at the same place and the prediction error seems to be the same for the 3 tolerance before their jump. 
+
+```{r}
+
+pcaDataCurrent <- prcomp(trainingSet[,-1], scale=F ) # TODO
+pcaDataTest <- predict(pcaDataCurrent, newdata=testingSet[,-1])
+pcaModel = data.frame(pcaDataCurrent$x[,c(1:(1+ldaMin))])
+model <- lda(pcaModel , grouping = trainingSet.contID , tol = 0.001)
+trainingResult = predict(model, pcaDataTest[,c(1:(1+ldaMin))])$class
+
+table(trainingResult, testingSet[,1])
+```
+The model is greatly more efficient than with all the components (we have no mistake here, but it may be due to the testing set size). Because we give up the less important and noisier components, the model overfit much less the data and the noise.
+
+Also the last PCAs tend to be more affected by the tolerance (A tolerance to decide if a matrix is singular; it will reject variables and linear combinations of unit-variance variables whose variance is less than tol^2. ) because their values are much smaller than the first ones.
+
+
+
+
+
+
+
+```{r}
+naxesList <- seq(2, 400, by=10)
+plot(naxesList, ldaError, main = "Prediction Error of Multinom and LDA as a function of naxes", xlab = "Number of predictors", ylab = "Prediction Error(%)" , col = 3, type ="l")
+lines(naxesList,multinomError, col = 4)
+legend("topright", legend = c("Multinom", "LDA"),lty = 1, col = c(4,3))
+```
+We can see that the lda seems to outperform his counterpart by 0.45% and doesn't overfit as much as the multinom model with a small enough tolerance. But from a certain point depending on the tolerance, the prediction error explode because we shrink the estimated covariance matrices towards a diagonal matrix too much, and for a number of PCA too high, we lose too much information and underfit the data set.
+
+## Part 4: Naive Bayes classifier
+
+### a)
+#### b)
+```{r naivebayes-function}
+NAm2aux = NAm2[,-(1:8)]
+NAcont <- cbind(contID=contID, NAm2aux)
+NAcont[,1] <- factor(NAcont[,1])
+
+# gets a vector of random indices
+set.seed(123)  # Set a seed to reproduce the results
+idx <- sample(nrow(NAm2aux))
+
+# Splits the dataset based on the indices (70% train and 30% test)
+train_data <- NAm2aux[idx[1:(0.7 * length(idx))], ]
+train_contID <- contID[idx[1:(0.7 * length(idx))]]
+
+test_data <- NAm2aux[idx[(0.7 * length(idx) + 1):length(idx)], ]
+test_contID <- contID[idx[(0.7 * length(idx) + 1):length(idx)]]
+
+# Computing principal components
+pcaNAm2 <- prcomp(train_data, scale=FALSE)
+
+#predictors
+predictors_train <- pcaNAm2$x
+predictors_test <- predict(pcaNAm2, newdata = test_data)
+
+size <- length(predictors_train[1,]);
+
+# Building the model
+pcs_data <- as.data.frame(cbind(contID = train_contID, predictors_train[, 1:size]))
+pcs_data$contID <- factor(pcs_data$contID)
+
+library(naivebayes)
+model <- naive_bayes(contID ~ ., data = pcs_data)
+      
+# Predict on the test set
+predictions_test <- predict(model, newdata = as.data.frame(predictors_test[, 1:size]))
+  
+print(table(test_contID, predictions_test))
+```
+To resolve this question, we found that Bernoulli Naive Bayes expects predictors with values 0 or 1 while its output from PCA will always be a real value (even if the initial values of the data matrix are zeros and ones). Thus, we choose to use naive_bayes with PCA, since this method accepts predictors that are real values. 
+
+This way we obtain the confusion matrix above. There we can see that 103 of the 148 test values were correctly predicted, which gives us a prediction of 69.59. We can also see that North America got 100% right, while South America got a lot of wrong results, especially compared to Central America. 
+
+#### c)
+```{r}
+
+bayesCV <- function(naxes){
+  valErrors = c()
+  for (i in (0:9)){
+    trainData = trainingSet[which(setList!=i),]
+    testData = trainingSet[which(setList==i),]
+    trainContId = trainingSet.contID[which(setList != i)]
+    pcaDataCurrent <- prcomp(trainData[,-1], scale=F ) # TODO
+    pcaDataTest <- predict(pcaDataCurrent, newdata=testData[,-1])
+    
+    pcaModel = data.frame(pcaDataCurrent$x[,c(1:(1+naxes))])
+    model <- naive_bayes(pcaModel, factor(trainContId), dist = "bernoulli")
+    trainingResult = predict(model, pcaDataTest[,c(1:(1+naxes))])
+    valErrors = append(valErrors, sum( trainingResult != trainingSet.contID[which(setList==i)]))
+  }
+  sorted = sort(valErrors/(nrow(trainingSet)/10))
+  return(c( median(sorted), sorted[2], tail(sorted, 2)[1], naxes))
+}
+
+```
+
+```{r KCVNB}
+NBRes = graphError(bayesCV, "Native Bayes")
+```
+
+The cross validation, error calculation and graphics were done as for the other questions. In it we can see that at first the graph shows a very small error around 100 PCs compared to the rest of the graph. Thus, by restricting the result between 83 and 101, we were able to arrive at an even more accurate result of 96 predictors for the smallest possible error of 16.89%.   
+
+#### d)
+```{r}
+NAm2aux = NAm2[,-(1:8)]
+NAcont <- cbind(contID=contID, NAm2aux)
+NAcont[,1] <- factor(NAcont[,1])
+
+# gets a vector of random indices
+set.seed(123)  # Set a seed to reproduce the results
+idx <- sample(nrow(NAm2aux))
+
+# Splits the dataset based on the indices (70% train and 30% test)
+train_data <- NAm2aux[idx[1:(0.7 * length(idx))], ]
+train_contID <- contID[idx[1:(0.7 * length(idx))]]
+
+test_data <- NAm2aux[idx[(0.7 * length(idx) + 1):length(idx)], ]
+test_contID <- contID[idx[(0.7 * length(idx) + 1):length(idx)]]
+
+# Computing principal components
+pcaNAm2 <- prcomp(train_data, scale=FALSE)
+
+#predictors
+predictors_train <- pcaNAm2$x[,1:95]
+predictors_test <- predict(pcaNAm2, newdata = test_data)
+
+size <- length(predictors_train[1,]);
+
+# Building the model
+pcs_data <- as.data.frame(cbind(contID = train_contID, predictors_train[, 1:size]))
+pcs_data$contID <- factor(pcs_data$contID)
+
+library(naivebayes)
+model <- naive_bayes(contID ~ ., data = pcs_data)
+      
+# Predict on the test set
+predictions_test <- predict(model, newdata = as.data.frame(predictors_test[, 1:size]))
+  
+print(table(test_contID, predictions_test))
+
+```
+Repeating question b, using 95 predictors (optimal number), we get 113 correct results out of 148. This way, we know that 76.35% of the predictions were correct, which gives much more reliability compared to the previous result, using all predictors. 
+
+### b)
+```{r}
+naxesList <- seq(2, 400, by=10)
+plot(naxesList, ldaError, main = "Prediction Error of Multinom and LDA as a function of naxes", xlab = "Number of predictors", ylab = "Prediction Error(%)" , col = 3, type ="l")
+lines(naxesList,NBError, col = 4)
+legend("topright", legend = c("NaiveBayes", "LDA"),lty = 1, col = c(4,3))
+```
+We can see that LDA is far more precise than the NaiveBayes. We passed from 4.95 to 16.89189%. It is due to the fact that the Bernouilli Naive Bayes model is not good with correlated PCA and not binary variables. Maybe using directly the data without PCA will provide better results here than here because the value is already binary.

@@ -1,0 +1,348 @@
+---
+title: "TP 4"
+output: html_document
+date: "2023-04-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### OLIVEIRA MOMBACH Aline, LI Maxime and PIOT Ghislain.
+## <b>TP 4: Graph mining and community detection</b>
+
+## <b>Part 1: Import and first explorations</b>
+```{r}
+suppressMessages(library(igraph))
+dat <- read.table("lesmis.txt", header = FALSE, sep = "\t")
+misgraph <- simplify(graph.data.frame(dat, directed=FALSE))
+```
+
+### (a)
+```{r echo=FALSE}
+plot.igraph(misgraph, vertex.size = 8, vertex.label.color='black', vertex.label.cex=0.5, layout=layout_nicely)
+```
+
+The chosen layout changes the function responsible for translating the graph from a list of nodes to points in a 2D graphical space.
+Some of them can force the graph to be a certain shape ( for example a circle ), while the more interesting ones present the graph nicely.
+In our case, we use the automatic selection algorithm from igraph, which selects Fruchterman-Reingold because we have less than 1000 vertices.
+
+### (b)
+This is an undirected network graph.
+```{r echo=FALSE}
+cat('The graph is of size', gsize(misgraph), '\n')
+cat('The graph is of order', gorder(misgraph), '\n')
+cat('The graph density is', edge_density(misgraph), '\n')
+cat('The graph diameter is', diameter(misgraph, weights=NA), '\n')
+```
+The graph is connected because there are no isolated points and it is undirected
+
+The graph is also not bipartite.
+
+The graph is not complete, because we have a lot of vertices that don't have edges with all other vertices.
+
+### (c)
+```{r}
+set.seed(3) # We set the seed to have reproducible results
+V(misgraph)$label.cex <- (degree(misgraph)+10)/max(degree(misgraph)) # We set the size of the font of the label based on the degree of the node
+l <- layout_with_fr(misgraph) # We get the numerical matrix
+```
+
+```{r}
+plot(misgraph, layout=l, vertex.size=3, main="Network of Les Misérables Characters")
+```
+
+The graph is a community structure centered on Jean Valjean. We can already see some clusters, such as the people affiliated with the Church on the bottom right.
+
+The Fruchterman-Reingold is an algorithm that creates a 2D representation of a graph by solving a physics optimization problem. They drew inspiration from Eades' algorithm but modified it to get better results.
+
+There are two forces at work : an attractive and a repelling one.
+The attractive force is similar to gravity : the neighboring vertices will attract themselves.
+However, the repelling one is not limited to neighbors, and all vertices will repel each other.
+
+Limiting the attractive force to affect only its neighbors is not just an aesthetic concern, it also dramatically reduces the time complexity of computing the attractive forces to a linear one.
+
+Computing the repulsive forces is still akin to solving an n-body problem, but the calculation can be sped up by dividing the space in a square grid, and only computing the forces with the vertices present in the same square.
+
+There is also a way to make the algorithm converge more easily : by setting a limit on the total distance a vertex can be displaced. This is called temperature.
+
+## <b>Part 2: Community detection</b>
+
+### <b>- Hierarchical agglomerative clustering</b>
+
+### (a)
+
+Hierarchical agglomerative clustering is a bottom-up approach to clustering that starts with each data point as a separate cluster and then iteratively merges the most similar clusters together until all the data points are in a single cluster. The similarity between clusters is measured by a distance metric, such as Euclidean distance or cosine similarity, and the merging process is represented by a dendrogram.
+
+The algorithm (Agglomerative hierarchical clustering)
+
+1) Start with each point being its own cluster
+
+2) Identify the closest two clusters and merge them
+
+3) Repeat
+
+4) End when all points are in a single cluster
+
+### (b)
+
+```{r}
+
+# Jaccard similarity is calculated as the ratio of the number of vertices shared between two nodes to the total number of vertices that are present on at least one of the nodes.
+misgraph.similarity = similarity.jaccard(misgraph)
+
+misgraph.dissimilarity = 1 - misgraph.similarity
+
+# method: complete linkage -> define the distance between two clusters
+mishclust = hclust(as.dist(misgraph.dissimilarity), method='complete')
+```
+
+### (c)
+
+```{r}
+mod = c()
+for (i in 1:77) {
+  labels = cutree(mishclust , i)
+  mod[i] = modularity(x=misgraph, membership=labels)
+}
+plot(mod,type="l", , main="Modularity in function of the number of communities wanted using the Hierarchical agglomerative clustering", xlab = "Number of communities", ylab = "Modularity")
+cat("The biggest modularity is ", max(mod), " and is reached for ", max_index <- which.max(mod), "communities")
+```
+
+This code computes the modularity of the graph for a number of clusters between 1 and 10. The goal is to identify the optimal number of clusters (or communities) in the graph that maximizes modularity. Thus, the plot represents a line graph showing how modularity varies with the number of clusters
+
+We are looking for the highest modularity, so we increased the number of iterations to 77 and took the maximum value. The most appropriate number of communities to divide the graph is 16 clusters.
+
+### (d)
+
+```{r}
+V(misgraph)$label.cex <- 0.8
+labels = cutree(mishclust, 16)
+V(misgraph)$color = labels
+plot(misgraph, layout=l, vertex.size=10)
+```
+
+In light blue on the left side, we can see a community with Fantine and the wealthy students, most notably Tholomyes who is the father of Cosette.
+
+On the bottom in dark blue, we can see most of the church, save for the bishop.
+
+The bishop is in light pink, and most of the light pink members are in the center. They consist of not only some of the Thénardier family, but also Javert and Jean Valjean, which are some of the most important characters in the book.
+
+The green community has the rest of the Thénardier family. In yellow on the bottom, we have people related to the prison.
+
+The orange and gray communities seem to not be defined really well. The algorithm seems to have trouble classifying characters that are too central to the plot and appear with too many people at the same time.
+
+
+```{r}
+V(misgraph)$label.cex <- 0.8
+
+for (i in 1:16) {
+  cluster <- induced_subgraph(misgraph, which(labels == i))
+ 
+  cat("\nCluster ", i)
+  cat("\nDensity", edge_density(cluster));
+  # cat("\nProximity",(sum(distances(cluster)) - sum(diag(distances(cluster))) / (vcount(cluster)*(vcount(cluster)-1)/2)));
+ 
+  plot(cluster, vertex.size = 10)
+}
+
+```
+
+In the case of proximity, the goal is to measure the proximity between two nodes. We can see that the first clusters have a greater proximity, while the others (especially at the end) do not, because we have nodes that do not even have connections.
+
+Graph density represents the ratio between the edges present in a graph and the maximum number of edges that the graph can contain. We can infer the same thing. We have graphs with very high densities, such as cluster 4, where every node is connected to every other node (complete and density 1), at the beginning. In the last clusters, the nodes are more disconnected, so the densities are lower.
+
+### (e)
+
+```{r}
+plot(mishclust, labels=V(misgraph)$name, hang=-1, cex=0.6 , main="Cluster Dendrogram using the Hierarchical agglomerative clustering")
+```
+
+We get the dendrogram.
+
+### (f)
+
+```{r}
+# method: single linkage
+mishclustSingle = hclust(as.dist(misgraph.dissimilarity), method='single')
+
+V(misgraph)$label.cex <- 0.8
+labels = cutree(mishclust, 20)
+V(misgraph)$color = labels
+plot(misgraph, layout=l, vertex.size=10)
+
+```
+
+```{r, echo=FALSE}
+mod = c()
+for (i in 1:40) {
+  labels = cutree(mishclustSingle , i)
+  mod[i] = modularity(x=misgraph, membership=labels)
+}
+plot(mod,type="l", , main="Single linkage", xlab = "Number of communities", ylab = "Modularity")
+cat("The biggest modularity is ", max(mod), " and is reached for ", max_index <- which.max(mod), "communities")
+```
+
+
+```{r}
+# method: average linkage
+mishclustAverage = hclust(as.dist(misgraph.dissimilarity), method='average')
+
+V(misgraph)$label.cex <- 0.8
+labels = cutree(mishclust, 12)
+V(misgraph)$color = labels
+plot(misgraph, layout=l, vertex.size=10)
+```
+
+```{r, echo=FALSE}
+mod = c()
+for (i in 1:40) {
+  labels = cutree(mishclustAverage , i)
+  mod[i] = modularity(x=misgraph, membership=labels)
+}
+plot(mod,type="l", , main="Average Linkage", xlab = "Number of communities", ylab = "Modularity")
+cat("The biggest modularity is ", max(mod), " and is reached for ", max_index <- which.max(mod), "communities")
+
+```
+
+We can define the distance between two clusters using three methods:
+
+Single linkage: Minimal inter-cluster dissimilarity - it tends to produce long thin clusters
+
+Complete linkage: Maximal inter-cluster dissimilarity. - it tends to create compact clusters of clusters
+
+Average linkage: Mean inter-cluster dissimilarity.
+
+The average linkage method is a compromise between the single and complete linkage methods, which avoids the extremes of either large or tight compact clusters. Unlike other methods, the average linkage method has better performance on ball-shaped clusters in the feature space.
+
+In this case, we have this results:
+
+ - Complete linkage resulted in a modularity of 0.4256076, with 16 communities.
+
+ - Single linkage resulted in a modularity of 0.4194231, with 20 communities.
+ 
+ - Average linkage resulted in a modularity of 0.4368219, with 12 communities.
+ 
+ So we can conclude that average linkage is better, based on the modularity.
+ 
+
+### <b>- Edge betweenness</b>
+
+### (a)
+Edge betweenness is a measure of the number of shortest paths in a network that go through a particular edge.
+Edges with high betweenness are likely to be part of the shortest paths connecting different communities or groups of nodes, removing these edges can help separate these groups into distinct clusters.
+
+The edge betweenness is a metric that measures the number of shortest paths between pairs of vertices in a graph that pass through a given edge. If there is more than one shortest path between a pair of vertices, each path is given equal weight such that the total weight of all of the paths is unity. This measure is used in a clustering algorithm based on the Girvan-Newman algorithm, where edges with high betweenness scores are iteratively removed to form clusters. The resulting clusters are formed by the nodes that are disconnected by the removed edges. This algorithm is a divisive method for hierarchical clustering.
+
+The algorithm (Divisive hierarchical clustering with edge betweenness)
+
+1) Calculate betweenness scores for all edges in the network
+
+2) Find the edge with the highest score and remove it from the network
+
+ - If the edge removal splits the graph, then divide the graph into subgroups and
+compute the edge betweenness of the subgraphs
+
+ - Else update the edge betweenness for the whole graph
+
+3) Repeat Step 2
+
+### (b)
+
+```{r}
+misgraph <- simplify(graph.data.frame(dat, directed=FALSE))
+mis_edgeb <- cluster_edge_betweenness(misgraph)
+plot(mis_edgeb,misgraph, layout=l, vertex.size=10)
+```
+The dark blue community in the bottom consists of all the church members this time. The light blue community on the left is also quite similar, with Fantine and the people she spent time with. Most of the people in green took part in the insurrection. The orange group is more obscure, and has not only some supporting characters but also Cosette, one of the main subjects of the book.
+
+The other 4 communities are quite small and are made of characters that don't appear that much. However, this algorithm is much better at picking them out and putting them in separate communities.
+
+In the middle in dark orange, we still have the most recurring characters such as Thénardier and Marius, except for Jean Valjean.
+
+```{r}
+mis_edgeb_dendo =as.hclust(mis_edgeb)
+
+plot(mis_edgeb_dendo, labels=V(misgraph)$name, hang=-1, cex=0.6)
+```
+
+### (c)
+
+```{r}
+f <- function(i){
+  misgraph2 = delete.edges(misgraph,mis_edgeb$removed.edges[seq(length=i)])
+  cl = clusters(misgraph2)$membership
+  modularity(misgraph,cl)
+}
+mods = sapply(0:ecount(misgraph), f)
+
+misgraph2<-delete.edges(misgraph,mis_edgeb$removed.edges[seq(length=which.max(mods)-1)])
+```
+
+This code calculates the modularity of each iteration of Divisive hierarchical clustering with edge betweenness algorithm and plots the network graph at the step that maximizes the modularity (we removed the edge with highest score each time). So it is
+
+```{r}
+cat("The biggest modularity is ", max(mods), " and is reached for ", length(mis_edgeb), "communities")
+```
+
+Now we can plot the graphs again:
+
+```{r}
+plot(mods,type="l", main="Modularity in function of the number of edge removed for the Edge Betweenness Algorithm", ylab = "Modularity", xlab="Iteration")
+plot(mis_edgeb, misgraph2, layout=l, vertex.size=10, main="Clustering using the Edge Betweenness Algorithm")
+```
+
+We can see that we reduced the number of communities to 11 compared to the HAC
+For the edge betweenness, we can remark that unlike the other, each community is a connected graph. It can be explained by the fact that the clustering is made by putting each connected edge together in a community.
+
+The Edge Betweenness modularity(0.5380681) is better than the Hierarchical agglomerative clustering one(0.4256076). The number of communities is also less than the hierarchical one.
+One way to explain this is that , while the edge betweenness and HAC are both hierarchical clustering methods, they are not based on the same measure.
+The HAC is based on dissimilarity and greedily selects the two nearest communities to merge. Whereas the second uses edge betweenness as measurement and at each iteration remove the edge that has the most chance to connect two communities and so may have a more significant impact on the modularity than the first one.
+
+### <b>- Spectral clustering and the Louvain algorithm</b>
+#### Louvain
+```{r}
+mis_louvain <- cluster_louvain(misgraph)
+plot(mis_louvain,misgraph, layout=l, vertex.size=10)
+cat("The biggest modularity for the louvain algorithm is ", max(mis_louvain$modularity), " and is reached for ", length(mis_louvain), "communities")
+```
+The Louvain algorithm has a little randomness when choosing between two configurations with the same modularity score. So we get a number of community between 5 and 7
+
+#### Spectral clustering
+
+From the documentation, this function seems to correspond to the spectral community detection algorithm from the course and not the "Embedding the data points into an Euclidean space based on the Laplacian" procedure, because it is based on the leading eigenvector of the modularity matrix.
+
+So we are going to use spectral community detection instead of spectral clustering.
+```{r}
+mis_spectral <- cluster_leading_eigen(misgraph)
+plot(mis_spectral,misgraph, layout=l, vertex.size=10)
+cat("The biggest modularity for the Spectral Clustering algorithm is ", max(mis_spectral$modularity), " and is reached for ", length(mis_spectral), "communities")
+```
+
+### <b>- Conclusion</b>
+
+Each of the four algorithms is based on a network measure. HAC is based on dissimilarity, Hierarchical Divisive Clustering is based on edge betweenness,  the Louvain is based on modularity.
+So it's no coincidence that Louvain and spectral community detection algorithms fare well if we compare them using modularity as a criterion.
+
+The two Hierarchical Clustering algorithms both follow a greedy approach, possibly missing the global optimum.
+Because they are not based on the same measure, there is a gap between their modularity.
+The HAC is based on dissimilarity and greedily selects the two nearest communities to merge. Whereas the second uses edge betweenness as measurement and at each iteration remove the edge that has the most chance to connect two communities and so may have a more significant impact on the modularity than the first one.
+
+Even if the edge betweenness target quantity being minimized is not naturally related to clustering, its value is similar to the Spectral community detection modularity even though the spectral community detection uses modularity as a criterion.
+
+Between the two modularity based algorithms, we can note some differences. Louvain uses a greedy bottom up approach and is not deterministic, it has some randomness when at a step, two choices have the same modularity. So the number of communities can vary and the algorithm can miss the optimal solution because it is greedy.
+The spectral community detection uses a relaxation heuristic approach to the problem. Therefore, the results are not necessarily the global optimum and may need some fine tuning.
+
+For the difference between communities, We can see that the modularity based algorithms tend to have fewer communities than the Hierarchical Clustering ones.
+
+The HAC is the most prone to create unconnected communities because it uses the dissimilarities. Therefore HAC may merge nodes from different clusters into the same cluster because they may share similarities (like being connected to the same communities), leading to disconnected clusters.
+
+For the edge betweenness, we can remark that unlike the other, each community is a connected graph and doesn't overlap on other. It can be explained by the fact that the clustering is made by putting each connected edge together in a community.
+
+Because the modularity based algorithm tries to only maximize the modularity, they tend to create overlapping communities. Especially for the spectral community detection, as the eigenvectors do not have a direct physical interpretation, the interpretation of the cluster may be difficult.
+
+
+
+
+
+
