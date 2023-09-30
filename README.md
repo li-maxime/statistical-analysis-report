@@ -1,17 +1,18 @@
-#Ensimag 2A SADM - TP 2022/23
+Ensimag 2A SADM - TP 2022/23
 ============================
 
-#Academic Project
+Academic Project
 
 
-#Objective : Practical work on our Statistical Analysis and Data Mining Course
+Objective : Practical work on our Statistical Analysis and Data Mining Course
 
 
 
-Team : Team of 2
-Time Spent : ~10 hours per Report
+Team : Team of 2   
+Time Spent : ~10 hours per Report   
 Technologies used:
 - R
+
 
 List of Practical works and notion:
 - TP 1: Analysis of prostate cancer data : 
